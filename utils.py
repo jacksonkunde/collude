@@ -1,7 +1,6 @@
 import random
 import re
 import torch
-import tiktoken
 import numpy as np
 from tqdm import tqdm
 

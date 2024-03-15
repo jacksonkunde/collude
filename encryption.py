@@ -71,7 +71,6 @@ class Encryptor:
         probs = topk_probs_dict[q]
 
         # finish the encryption of the top value by regular generation.
-        print(torch.tensor([topk_encrypts_dict[q][0]]))
         finished_gen = self.easy_gen(torch.tensor([topk_encrypts_dict[q][0]]), encoded=True)
 
         return finished_gen, list(zip(encrypts, probs))
@@ -87,7 +86,6 @@ class Encryptor:
         if self.n == 5:
             char_set = '01'
 
-        print(char_set)
         mapping = map_char_to_token(set(char_set), set(self.vocabulary), remaining_map='0')
 
         gen_encoding_funcs = {2: generate_two_digit_encoding, 3: generate_three_digit_encoding, 4: generate_four_digit_encoding, 5: generate_five_digit_encoding}
@@ -144,8 +142,6 @@ class Encryptor:
 
                 # Calculate probabilities for the first encrypt
                 if i == 0:
-                    # topk = topk_func(i)
-                    # print(topk)
                     start_ids = self.encode(start)
                     encoded_start = torch.tensor(start_ids, dtype=torch.long, device=self.device)[None, ...]
                     encoded_start = encoded_start.squeeze(0)
@@ -155,7 +151,6 @@ class Encryptor:
                       logits = self.model(encoded_start)[0].squeeze()
                     else:
                       logits = self.model(encoded_start).logits[:, -1, :]
-                    # log_probs = torch.log(torch.softmax(logits, dim=-1))
                     logits = remove_nans_from_logits(logits)
                     log_probs = self.log_softmax(logits)
 
@@ -224,9 +219,9 @@ class Encryptor:
     def easy_gen(self, start, encoded=False, ret_decoded=True):
 
         if encoded:
-            gen = self.model.generate(start.to(self.device), temperature=1, max_length=500)
+            gen = self.model.generate(start.to(self.device), temperature=1, max_length=1000)
         else:
-            gen = self.model.generate(self.encode(start).to(self.device), temperature=1, max_length=500)
+            gen = self.model.generate(self.encode(start).to(self.device), temperature=1, max_length=1000)
 
         if ret_decoded:
             return self.decode(gen)
@@ -271,6 +266,3 @@ class Encryptor:
         self.reverse_encryption = mappings["reverse_encryption"]
         self.n_digit_encoding = mappings["n_digit_encoding"]
         self.reverse_n_digit_encoding = mappings["reverse_n_digit_encoding"]
-
-
-### HELPER FUNCTIONS
