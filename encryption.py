@@ -166,7 +166,6 @@ class Encryptor:
                 if i == 0:
                     if encoded:
                         encoded_start = start
-                        encoded_start = encoded_start.squeeze(0)
                     else:
                         start_ids = self.encode(start)
                         encoded_start = torch.tensor(start_ids, dtype=torch.long, device=self.device)[None, ...]
