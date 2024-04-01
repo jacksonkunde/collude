@@ -22,6 +22,7 @@ class Encryptor:
         self.model = model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, token=os.environ["HF_TOKEN"])
         self.encode = lambda text: self.tokenizer(text, return_tensors="pt", return_attention_mask=False).input_ids
+        self.batch_encode = lambda text: self.tokenizer(text, return_tensors="pt", padding=True, truncation=True, return_attention_mask=False).input_ids
         self.decode = lambda outputs: self.tokenizer.batch_decode(outputs)
         self.load_vocabulary(vocab_type)
         self.log_softmax = torch.nn.LogSoftmax(dim=-1)
@@ -74,6 +75,174 @@ class Encryptor:
         finished_gen = self.easy_gen(torch.tensor([topk_encrypts_dict[q][0]]), encoded=True)
 
         return finished_gen, list(zip(encrypts, probs))
+    
+    # num_decode is the number of top encryptions to decode into plain text and return
+    def batch_encrypt(self, start: list, secret_messages: list, topk: int, num_decode: int = 1):
+        
+        # define our list of top encryptions and their probabilities for each secret message and start pair
+        encrypts = []
+        probs = []
+        
+        # batch encode the starts
+        encoded_starts = self.batch_encode(start)
+        
+        # encode the secret messages
+        n_digit_encoded_secret_messages = [n_digit_encode(secret_message, self.n_digit_encoding) for secret_message in secret_messages]
+        
+        # go through each secret message and get the topk encryptions
+        for i, n_digit_encoded_secret_message in enumerate(n_digit_encoded_secret_messages):
+            
+            # index of the last encryption
+            q = (len(secret_message) * self.n) - 1
+            
+            topk_encrypts_dict, topk_probs_dict = self.fastest_topk(encoded_starts[i], n_digit_encoded_secret_message, topk=topk, encoded=True)
+            
+            # get the top num_decode encryptions and add them to the list
+            encrypts.extend(topk_encrypts_dict[q][:num_decode])
+            
+            # get the probabilities of the top num_decode encryptions and add them to the list
+            probs.extend(topk_probs_dict[q][:num_decode])
+            
+        # pad the encryptions to the same length using pytorch
+        encrypts = torch.nn.utils.rnn.pad_sequence([torch.tensor(x) for x in encrypts], batch_first=True, padding_value=0)
+        
+        encrypts.to(self.device) # move to device
+            
+        # finish all of top num decode encryptions
+        finished_gens = self.model.generate(encrypts, temperature=1, max_length=1000)
+            
+        # decode all finished gens
+        decoded_gens = self.decode(finished_gens)
+        
+        return zip(decoded_gens, probs)
+    
+    
+    def fastest_topk(self, start: string, secret_message: string, topk: int = 2, encoded: bool = False):
+
+        """
+        Analyzes the top-k most likely encryptions for a secret message with progress visualization using tqdm.
+
+        Args:
+            model: The language model to use.
+            start: The starting token for the analysis.
+            secret_message: The secret message to be analyzed.
+            mapping: A dictionary mapping characters to their encryptions.
+            topk: The number of top predictions to return.
+
+        Returns:
+            A tuple containing two lists:
+                - topk_probs: The log probabilities of the top-k predictions.
+                - topk_encrypts: The indices of the top-k predictions.
+        """
+
+        def remove_nans_from_logits(logits):
+            nan_mask = torch.isnan(logits)
+
+            # Replace NaNs with a suitable value (e.g., 0 or a very small negative number)
+            logits[nan_mask] = 0
+
+            return logits
+
+        topk_probs_dict = {} ## maintains the topk information at each iteration
+        topk_encrypts_dict = {}
+        log_probs_of_encrypts = 0
+        mapping = self.tensor_mapping
+        with torch.no_grad():
+            for i, char in tqdm(enumerate(secret_message), total=len(secret_message), desc="Processing characters"):
+
+                curr_encrypts = mapping[char].to(self.device)
+
+                # Calculate probabilities for the first encrypt
+                if i == 0:
+                    if encoded:
+                        encoded_start = start
+                        encoded_start = encoded_start.squeeze(0)
+                    else:
+                        start_ids = self.encode(start)
+                        encoded_start = torch.tensor(start_ids, dtype=torch.long, device=self.device)[None, ...]
+                        encoded_start = encoded_start.squeeze(0)
+
+                    # get logits from the model
+                    if self.model_name == "gpt-2":
+                      logits = self.model(encoded_start)[0].squeeze()
+                    else:
+                      logits = self.model(encoded_start).logits[:, -1, :]
+                    logits = remove_nans_from_logits(logits)
+                    log_probs = self.log_softmax(logits)
+
+                    best_tokens = logits.argsort(descending=True, dim=-1).squeeze()
+                    best_encrypts = intersection(best_tokens, curr_encrypts)[:topk]
+                    encrypts = torch.cat([encoded_start.repeat(topk, 1), best_encrypts.unsqueeze(1)], dim=1)
+
+                    topk_encrypts_dict[i] = encrypts.tolist()
+
+                    best_encrypts = best_encrypts.unsqueeze(0)
+
+                    log_probs_of_encrypts = log_probs[:, best_encrypts[0, :]]
+                    topk_probs_dict[i] = log_probs_of_encrypts.tolist()
+                    log_probs_of_encrypts = log_probs_of_encrypts.reshape(topk, 1)
+
+                else:
+                    # Calculate probabilities for the next encrypts
+                    # get logits from the model
+                    if self.model_name == "gpt-2":
+                      logits = self.model(encrypts)[0].squeeze()
+                    else:
+                      logits = self.model(encrypts).logits[:, -1, :]
+                    logits = remove_nans_from_logits(logits)
+                    log_probs = self.log_softmax(logits)
+                    log_probs += log_probs_of_encrypts
+                    best_tokens = logits.argsort(descending=True, dim=-1).squeeze()
+                    best_encrypts_list = []
+                    for j in range(best_tokens.size(0)):
+                        best_encrypts = intersection(best_tokens[j], curr_encrypts)[:topk]
+                        best_encrypts_list.append(best_encrypts)
+
+                    best_encrypts = torch.stack(best_encrypts_list)
+
+                    # get the log probs of the top k encrypts for each encryption
+                    log_probs = log_probs[torch.arange(topk).view(-1, 1), best_encrypts]
+
+                    # Use torch.topk to get the indices of the top k values
+                    topk_values, topk_indices = torch.topk(log_probs.flatten(), topk)
+
+                    mask = torch.zeros_like(log_probs.flatten(), dtype=torch.bool)
+                    mask[topk_indices] = 1
+                    mask = mask.reshape(log_probs.shape)
+
+                    # Apply the mask to the original tensor
+                    best_encrypts *= mask
+                    log_probs *= mask
+
+                    log_probs_of_encrypts = log_probs[log_probs != 0]
+                    topk_probs_dict[i] = log_probs_of_encrypts.tolist()
+
+                    log_probs_of_encrypts = log_probs_of_encrypts.reshape((topk, 1))
+
+                    # update encryptions to include the new best encrypts
+                    new_encrypts = []
+                    for j in range(best_encrypts.size(0)):
+                        x = best_encrypts[j][log_probs[j] != 0]
+                        n = x.shape[0]
+                        if n != 0:
+                            new_encrypts.append(torch.cat([encrypts[j].repeat(n, 1), x.unsqueeze(1)], dim=1))
+
+                    encrypts = torch.cat(new_encrypts, dim=0)
+                    topk_encrypts_dict[i] = encrypts.tolist()
+
+            return topk_encrypts_dict, topk_probs_dict
+
+    def easy_gen(self, start, encoded=False, ret_decoded=True):
+
+        if encoded:
+            gen = self.model.generate(start.to(self.device), temperature=1, max_length=1000)
+        else:
+            gen = self.model.generate(self.encode(start).to(self.device), temperature=1, max_length=1000)
+
+        if ret_decoded:
+            return self.decode(gen)
+        else:
+            return gen
 
     def _n_digit_help(self):
 
@@ -124,7 +293,6 @@ class Encryptor:
 
         def remove_nans_from_logits(logits):
             nan_mask = torch.isnan(logits)
-            valid_mask = ~nan_mask  # Invert the mask to find valid values
 
             # Replace NaNs with a suitable value (e.g., 0 or a very small negative number)
             logits[nan_mask] = 0
