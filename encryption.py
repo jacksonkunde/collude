@@ -88,7 +88,7 @@ class Encryptor:
         
         # encode the secret messages
         if isinstance(secret_messages, str):
-            n_digit_encoded_secret_messages = n_digit_encode(secret_message, self.n_digit_encoding)
+            n_digit_encoded_secret_messages = n_digit_encode(secret_messages, self.n_digit_encoding)
         else:
             # then it must be a list of secret messages
             n_digit_encoded_secret_messages = [n_digit_encode(secret_message, self.n_digit_encoding) for secret_message in secret_messages]
@@ -103,7 +103,7 @@ class Encryptor:
                 n_digit_encoded_secret_message = n_digit_encoded_secret_messages[i]
             
             # index of the last encryption
-            q = (len(secret_message) * self.n) - 1
+            q = len(n_digit_encoded_secret_message)
             
             topk_encrypts_dict, topk_probs_dict = self.fastest_topk(encoded_starts[i], n_digit_encoded_secret_message, topk=topk, encoded=True)
             
