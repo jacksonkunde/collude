@@ -156,13 +156,13 @@ class Encryptor:
         probs = []
 
         # batch encode the starts
-        encoded_starts = self.batch_encode(start)
+        encoded_starts = self.batch_encode(start).to(self.device)
 
         # encode the secret messages
         if isinstance(secret_messages, str):
-            n_digit_encoded_secret_messages = n_digit_encode(
+            n_digit_encoded_secret_messages = [n_digit_encode(
                 secret_messages, self.n_digit_encoding
-            )
+            )]
         else:
             # then it must be a list of secret messages
             n_digit_encoded_secret_messages = [
@@ -179,7 +179,7 @@ class Encryptor:
                 n_digit_encoded_secret_message = n_digit_encoded_secret_messages[i]
 
             # index of the last encryption
-            q = len(n_digit_encoded_secret_message)
+            q = len(n_digit_encoded_secret_messages) - 1
 
             topk_encrypts_dict, topk_probs_dict = self.fastest_topk(
                 encoded_starts[i],
@@ -198,8 +198,7 @@ class Encryptor:
         encrypts = torch.nn.utils.rnn.pad_sequence(
             [torch.tensor(x) for x in encrypts], batch_first=True, padding_value=0
         )
-
-        encrypts.to(self.device)  # move to device
+        encrypts.to(self.device)
 
         # finish all of top num decode encryptions
         finished_gens = self.model.generate(encrypts, temperature=1, max_length=1000)
@@ -207,7 +206,7 @@ class Encryptor:
         # decode all finished gens
         decoded_gens = self.decode(finished_gens)
 
-        return zip(decoded_gens, probs)
+        return decoded_gens
 
     def fastest_topk(
         self, start: str, secret_message: str, topk: int = 2, encoded: bool = False
@@ -228,7 +227,6 @@ class Encryptor:
                 - topk_probs: The log probabilities of the top-k predictions.
                 - topk_encrypts: The indices of the top-k predictions.
         """
-
         def remove_nans_from_logits(logits):
             nan_mask = torch.isnan(logits)
 
@@ -253,13 +251,14 @@ class Encryptor:
                 # Calculate probabilities for the first encrypt
                 if i == 0:
                     if encoded:
-                        encoded_start = start
+                        encoded_start = start.unsqueeze(0)
                     else:
                         start_ids = self.encode(start)
                         encoded_start = torch.tensor(
                             start_ids, dtype=torch.long, device=self.device
                         )[None, ...]
                         encoded_start = encoded_start.squeeze(0)
+                        print(encoded_start.shape)
 
                     # get logits from the model
                     if self.model_name == "gpt-2":
