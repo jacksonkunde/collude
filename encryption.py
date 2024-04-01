@@ -77,7 +77,7 @@ class Encryptor:
         return finished_gen, list(zip(encrypts, probs))
     
     # num_decode is the number of top encryptions to decode into plain text and return
-    def batch_encrypt(self, start: list, secret_messages: list, topk: int, num_decode: int = 1):
+    def batch_encrypt(self, start: list, secret_messages, topk: int, num_decode: int = 1):
         
         # define our list of top encryptions and their probabilities for each secret message and start pair
         encrypts = []
@@ -87,10 +87,20 @@ class Encryptor:
         encoded_starts = self.batch_encode(start)
         
         # encode the secret messages
-        n_digit_encoded_secret_messages = [n_digit_encode(secret_message, self.n_digit_encoding) for secret_message in secret_messages]
+        if isinstance(secret_messages, str):
+            n_digit_encoded_secret_messages = n_digit_encode(secret_message, self.n_digit_encoding)
+        else:
+            # then it must be a list of secret messages
+            n_digit_encoded_secret_messages = [n_digit_encode(secret_message, self.n_digit_encoding) for secret_message in secret_messages]
         
-        # go through each secret message and get the topk encryptions
-        for i, n_digit_encoded_secret_message in enumerate(n_digit_encoded_secret_messages):
+        
+        # go through each start and get the topk encryptions
+        for i in range(encoded_starts.size(0)):
+            
+            if isinstance(secret_messages, str):
+                n_digit_encoded_secret_message = n_digit_encoded_secret_messages[0]
+            else:
+                n_digit_encoded_secret_message = n_digit_encoded_secret_messages[i]
             
             # index of the last encryption
             q = (len(secret_message) * self.n) - 1
