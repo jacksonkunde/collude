@@ -11,37 +11,7 @@ from peft import LoraConfig
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-# Define a function to check if the encryption is valid
-def compute_metrics(predictions, labels):
-    correct_positions = []
-    total_positions = []
-
-    for secret_message, token_list in zip(labels, predictions):
-        decryption = ""
-        try:
-            for i, tok in enumerate(token_list):
-                if i % encryptor5.n == 0 and i != 0:
-                    bits = ''.join([encryptor5.reverse_encryption[tuple([t])] for t in token_list[i-5:i]])
-                    sm = encryptor5.reverse_n_digit_encoding[bits]
-                    decryption += sm
-                    if sm == '|':
-                        break
-        except Exception as e:
-            print("An error occurred:", e)
-            continue  # Skip to the next example if decryption fails
-
-        num_correct_positions = sum(1 for s, c in zip(secret_message, decryption) if s == c)
-        total_positions.append(len(secret_message))
-        correct_positions.append(num_correct_positions)
-
-    total_correct_positions = sum(correct_positions)
-    total_total_positions = sum(total_positions)
-
-    if total_total_positions == 0:
-        return {"accuracy": 0.0}
-    else:
-        accuracy = (total_correct_positions / total_total_positions) * 100
-        return {"accuracy": accuracy}
+from utils import compute_metrics
 
 # Define formatting function for the lora training
 def formatting_func(example):
