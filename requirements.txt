@@ -5,3 +5,5 @@ peft
 datasets
 trl
 wandb
+scipy
+matplotlib

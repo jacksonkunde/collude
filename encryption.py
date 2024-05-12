@@ -8,7 +8,7 @@ from tqdm import tqdm
 from typing import Optional
 from transformers import AutoTokenizer
 
-from utils import *
+from encryptor_utils import *
 
 
 class Encryptor:
